@@ -337,91 +337,92 @@ export function useMemories(options: UseMemoriesOptions = {}): UseMemoriesReturn
       if (fetchingRef.current) return;
       fetchingRef.current = true;
 
-      // Try IndexedDB first if no in-memory cache
-      if (!cached) {
-        const indexedDBMemories =
-          memoryView === 'useful_now'
-            ? await getCachedMemories(memoryView, memoryCacheScope)
-            : null;
-        if (!isCurrentRequest() || !isQueryCurrent()) return;
-        if (indexedDBMemories && indexedDBMemories.length > 0) {
-          console.log('[useMemories] Loaded from IndexedDB');
-          setMemories(indexedDBMemories);
-          offsetRef.current = indexedDBMemories.length;
-          setHasMore(indexedDBMemories.length >= limit);
-          // Also update in-memory cache
+      try {
+        // Try IndexedDB first if no in-memory cache
+        if (!cached) {
+          const indexedDBMemories =
+            memoryView === 'useful_now'
+              ? await getCachedMemories(memoryView, memoryCacheScope)
+              : null;
+          if (!isCurrentRequest() || !isQueryCurrent()) return;
+          if (indexedDBMemories && indexedDBMemories.length > 0) {
+            console.log('[useMemories] Loaded from IndexedDB');
+            setMemories(indexedDBMemories);
+            offsetRef.current = indexedDBMemories.length;
+            setHasMore(indexedDBMemories.length >= limit);
+            // Also update in-memory cache
+            setToCache(
+              key,
+              indexedDBMemories,
+              indexedDBMemories.length,
+              null,
+              indexedDBMemories.length >= limit,
+              false,
+              null,
+            );
+            setLoading(false);
+            // Continue to background refresh to get latest data
+          } else {
+            // No cache at all, show loading
+            setLoading(true);
+          }
+        } else {
+          // Already showing stale in-memory cache, don't show loading
+          setLoading(false);
+        }
+
+        setError(null);
+
+        try {
+          const page = await doFetch(activeCategories, 0);
+          if (!isCurrentRequest() || !isQueryCurrent()) return;
+          const pageHasMore =
+            Boolean(page.nextCursor) || (!page.truncated && page.memories.length >= limit);
+          setMemories(page.memories);
+          offsetRef.current = page.memories.length;
+          cursorRef.current = page.nextCursor;
+          setHasMore(pageHasMore);
+          setTruncated(page.truncated);
+          applyCapability(page.beliefEnabled);
+          // Update both caches
           setToCache(
             key,
-            indexedDBMemories,
-            indexedDBMemories.length,
-            null,
-            indexedDBMemories.length >= limit,
-            false,
-            null,
+            page.memories,
+            page.memories.length,
+            page.nextCursor,
+            pageHasMore,
+            page.truncated,
+            page.beliefEnabled,
           );
-          setLoading(false);
-          // Continue to background refresh to get latest data
-        } else {
-          // No cache at all, show loading
-          setLoading(true);
-        }
-      } else {
-        // Already showing stale in-memory cache, don't show loading
-        setLoading(false);
-      }
-
-      setError(null);
-
-      try {
-        const page = await doFetch(activeCategories, 0);
-        if (!isCurrentRequest() || !isQueryCurrent()) return;
-        const pageHasMore =
-          Boolean(page.nextCursor) || (!page.truncated && page.memories.length >= limit);
-        setMemories(page.memories);
-        offsetRef.current = page.memories.length;
-        cursorRef.current = page.nextCursor;
-        setHasMore(pageHasMore);
-        setTruncated(page.truncated);
-        applyCapability(page.beliefEnabled);
-        // Update both caches
-        setToCache(
-          key,
-          page.memories,
-          page.memories.length,
-          page.nextCursor,
-          pageHasMore,
-          page.truncated,
-          page.beliefEnabled,
-        );
-        if (memoryView === 'useful_now') {
-          await cacheMemories(page.memories, memoryView, memoryCacheScope);
-          if (!isCurrentRequest() || !isQueryCurrent()) return;
-        }
-      } catch (err) {
-        if (!isCurrentRequest() || !isQueryCurrent()) return;
-        // Check if we have any cached data to show
-        let hasAnyCachedData = !!cached;
-        if (!hasAnyCachedData) {
-          try {
-            const indexedDbMemories =
-              memoryView === 'useful_now'
-                ? await getCachedMemories(memoryView, memoryCacheScope)
-                : null;
+          if (memoryView === 'useful_now') {
+            await cacheMemories(page.memories, memoryView, memoryCacheScope);
             if (!isCurrentRequest() || !isQueryCurrent()) return;
-            hasAnyCachedData = !!indexedDbMemories;
-          } catch {
-            // If reading from IndexedDB fails, don't mask the original error
           }
-        }
+        } catch (err) {
+          if (!isCurrentRequest() || !isQueryCurrent()) return;
+          // Check if we have any cached data to show
+          let hasAnyCachedData = !!cached;
+          if (!hasAnyCachedData) {
+            try {
+              const indexedDbMemories =
+                memoryView === 'useful_now'
+                  ? await getCachedMemories(memoryView, memoryCacheScope)
+                  : null;
+              if (!isCurrentRequest() || !isQueryCurrent()) return;
+              hasAnyCachedData = !!indexedDbMemories;
+            } catch {
+              // If reading from IndexedDB fails, don't mask the original error
+            }
+          }
 
-        const baseMessage =
-          err instanceof Error ? err.message : 'Failed to load memories';
-        if (hasAnyCachedData) {
-          // Show that refresh failed but cached data is available
-          setError(`${baseMessage} (showing cached data)`);
-        } else {
-          setError(baseMessage);
-        }
+          const baseMessage =
+            err instanceof Error ? err.message : 'Failed to load memories';
+          if (hasAnyCachedData) {
+            // Show that refresh failed but cached data is available
+            setError(`${baseMessage} (showing cached data)`);
+          } else {
+            setError(baseMessage);
+          }
       } finally {
         if (isCurrentRequest()) {
           setLoading(false);
