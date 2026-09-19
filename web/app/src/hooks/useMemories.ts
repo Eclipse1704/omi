@@ -423,6 +423,7 @@ export function useMemories(options: UseMemoriesOptions = {}): UseMemoriesReturn
           } else {
             setError(baseMessage);
           }
+        }
       } finally {
         if (isCurrentRequest()) {
           setLoading(false);
