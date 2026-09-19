@@ -319,6 +319,33 @@ describe('useMemories beta capability negotiation and cache scope', () => {
     expect(mocks.setMemoryUseRequest.mock.calls[0][2]).not.toBe(firstFeedbackId);
   });
 
+  it('releases the fetch lock when IndexedDB warmup is abandoned by a query change', async () => {
+    let resolveIndexedDb: (value: null) => void = () => {};
+    const pendingIndexedDb = new Promise<null>((resolve) => {
+      resolveIndexedDb = resolve;
+    });
+    mocks.getCachedMemories.mockReturnValueOnce(pendingIndexedDb);
+    mocks.getMemoriesPage.mockResolvedValueOnce(page(null, 'Manual memory'));
+
+    const { result } = renderHook(() => useMemories({ limit: 25 }));
+    await waitFor(() => expect(mocks.getCachedMemories).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      result.current.setCategories(['manual']);
+    });
+
+    resolveIndexedDb(null);
+    await act(async () => {
+      await pendingIndexedDb;
+    });
+
+    await waitFor(() => expect(mocks.getMemoriesPage).toHaveBeenCalledTimes(1));
+    expect(mocks.getMemoriesPage.mock.calls[0][0]).toMatchObject({
+      categories: ['manual'],
+    });
+    expect(result.current.memories[0]?.content).toBe('Manual memory');
+  });
+
   it('fetches the newly selected view after a refresh that was in flight when the view changed', async () => {
     let resolveRefresh: (value: MemoryPage) => void = () => {};
     const pendingRefresh = new Promise<MemoryPage>((resolve) => {
